@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from audio_converter import CONTENT_TYPES, SUPPORTED_FORMATS, convert_audio
 from config import Settings
+from elevenlabs_routes import router as elevenlabs_router
 from errors import TTSError, openai_error_response
 from tts_engine import TTSEngine
 from voice_presets import VoicePresetManager
@@ -56,6 +57,10 @@ async def lifespan(app: FastAPI):
     engine = TTSEngine(settings)
     await engine.load_model()
     app.state.engine = engine
+    app.state.settings = settings
+    app.state.preset_manager = preset_manager
+    app.state.inference_semaphore = inference_semaphore
+    app.state.queue_depth = 0
 
     yield
 
@@ -63,6 +68,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Sesame TTS", lifespan=lifespan)
+app.include_router(elevenlabs_router)
 
 
 # --- Request/Response Models ---

@@ -14,6 +14,21 @@ class VoicePreset:
     description: str = ""
     speaker_embedding_path: str | None = None
 
+    def elevenlabs_metadata(self, base_url: str = "") -> dict:
+        """Return voice metadata in ElevenLabs API format."""
+        return {
+            "voice_id": self.name,
+            "name": self.name,
+            "category": "generated",
+            "labels": {"accent": "conversational", "use_case": "conversational"},
+            "description": self.description,
+            "preview_url": f"{base_url}/v1/voices/{self.name}/preview" if base_url else None,
+            "settings": {
+                "stability": round(1.0 - self.temperature, 2),
+                "similarity_boost": 0.75,
+            },
+        }
+
 
 class VoicePresetManager:
     def __init__(self, presets_dir: Path):
@@ -33,3 +48,7 @@ class VoicePresetManager:
 
     def list_names(self) -> list[str]:
         return list(self.presets.keys())
+
+    def list_elevenlabs_format(self, base_url: str = "") -> list[dict]:
+        """List all voices in ElevenLabs API format."""
+        return [preset.elevenlabs_metadata(base_url) for preset in self.presets.values()]

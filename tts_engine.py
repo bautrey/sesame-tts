@@ -1,5 +1,7 @@
 import logging
+import threading
 import time
+from typing import Generator
 
 import mlx.core as mx
 import numpy as np
@@ -66,6 +68,60 @@ class TTSEngine:
             audio_np = np.array(audio)
 
         return audio_np, results[0].sample_rate
+
+    def generate_stream(
+        self,
+        text: str,
+        preset: VoicePreset,
+        interrupt_event: threading.Event,
+    ) -> Generator[tuple[np.ndarray, int], None, None]:
+        """Generate audio from text, yielding (audio_np, sample_rate) for each frame.
+
+        This is the streaming variant of generate(). Instead of collecting all
+        GenerationResult objects and concatenating, it yields each one individually
+        so the streaming pipeline can deliver audio chunks as they are produced.
+
+        In the sentence-splitting pipeline, this method is called once per sentence.
+        Each call produces one or more (audio_np, sample_rate) tuples. For a single
+        sentence (no newlines), model.generate() typically yields exactly one
+        GenerationResult.
+
+        The interrupt_event is checked between each frame yield. If set, generation
+        stops immediately and the generator returns. The interrupt_event is shared
+        across all sentences in a request -- setting it stops the entire pipeline.
+
+        Args:
+            text: The text to generate audio for (typically one sentence)
+            preset: Voice preset with generation parameters
+            interrupt_event: threading.Event checked between yields; if set, stop
+
+        Yields:
+            Tuple of (audio_numpy_float32, sample_rate) for each generated frame
+        """
+        sampler = make_sampler(temp=preset.temperature, top_k=preset.top_k)
+
+        frame_count = 0
+        for result in self.model.generate(
+            text=text,
+            voice=preset.voice_key,
+            speaker=preset.speaker_id,
+            sampler=sampler,
+            max_audio_length_ms=preset.max_audio_length_ms,
+            voice_match=True,
+        ):
+            # Check interrupt between frames
+            if interrupt_event.is_set():
+                logger.info(
+                    "Generation interrupted after %d frames: voice=%s text=%r",
+                    frame_count, preset.voice_key, text[:50],
+                )
+                break
+
+            audio_np = np.array(result.audio)
+            yield (audio_np, result.sample_rate)
+            frame_count += 1
+
+        logger.debug("generate_stream completed: %d frames for text=%r", frame_count, text[:50])
 
     def health(self) -> dict:
         """Return model health status."""
