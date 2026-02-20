@@ -1,156 +1,155 @@
-# CSM
+# Sesame TTS Server
 
-**2025/05/20** - CSM is availabile natively in [Hugging Face Transformers](https://huggingface.co/docs/transformers/main/en/model_doc/csm) 🤗 as of version `4.52.1`, more info available [in our model repo](https://huggingface.co/sesame/csm-1b)
+OpenAI-compatible local TTS server wrapping Sesame CSM-1B via [mlx-audio](https://github.com/Blaizzy/mlx-audio) for Apple Silicon Macs.
 
-**2025/03/13** - We are releasing the 1B CSM variant. The checkpoint is [hosted on Hugging Face](https://huggingface.co/sesame/csm_1b).
-
----
-
-CSM (Conversational Speech Model) is a speech generation model from [Sesame](https://www.sesame.com) that generates RVQ audio codes from text and audio inputs. The model architecture employs a [Llama](https://www.llama.com/) backbone and a smaller audio decoder that produces [Mimi](https://huggingface.co/kyutai/mimi) audio codes.
-
-A fine-tuned variant of CSM powers the [interactive voice demo](https://www.sesame.com/voicedemo) shown in our [blog post](https://www.sesame.com/research/crossing_the_uncanny_valley_of_voice).
-
-A hosted [Hugging Face space](https://huggingface.co/spaces/sesame/csm-1b) is also available for testing audio generation.
+Exposes `POST /v1/audio/speech` on `localhost:8880`, so any OpenAI TTS client (including OpenClaw) can switch to local generation with a config change.
 
 ## Requirements
 
-* A CUDA-compatible GPU
-* The code has been tested on CUDA 12.4 and 12.6, but it may also work on other versions
-* Similarly, Python 3.10 is recommended, but newer versions may be fine
-* For some audio operations, `ffmpeg` may be required
-* Access to the following Hugging Face models:
-  * [Llama-3.2-1B](https://huggingface.co/meta-llama/Llama-3.2-1B)
-  * [CSM-1B](https://huggingface.co/sesame/csm-1b)
+- Apple Silicon Mac (M1+) with macOS
+- Python 3.10-3.13
+- `ffmpeg` installed (`brew install ffmpeg`)
+- ~4GB disk for model weights (auto-downloaded on first run)
 
-### Setup
+## Installation
 
 ```bash
-git clone git@github.com:SesameAILabs/csm.git
-cd csm
-python3.10 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Disable lazy compilation in Mimi
-export NO_TORCH_COMPILE=1
-
-# You will need access to CSM-1B and Llama-3.2-1B
-huggingface-cli login
-```
-
-### Windows Setup
-
-The `triton` package cannot be installed in Windows. Instead use `pip install triton-windows`.
-
-## Quickstart
-
-This script will generate a conversation between 2 characters, using a prompt for each character.
-
-```bash
-python run_csm.py
+# Clone and install
+git clone <repo-url> sesame-tts
+cd sesame-tts
+uv sync
 ```
 
 ## Usage
 
-If you want to write your own applications with CSM, the following examples show basic usage.
-
-#### Generate a sentence
-
-This will use a random speaker identity, as no prompt or context is provided.
-
-```python
-from generator import load_csm_1b
-import torchaudio
-import torch
-
-if torch.backends.mps.is_available():
-    device = "mps"
-elif torch.cuda.is_available():
-    device = "cuda"
-else:
-    device = "cpu"
-
-generator = load_csm_1b(device=device)
-
-audio = generator.generate(
-    text="Hello from Sesame.",
-    speaker=0,
-    context=[],
-    max_audio_length_ms=10_000,
-)
-
-torchaudio.save("audio.wav", audio.unsqueeze(0).cpu(), generator.sample_rate)
+```bash
+# Start the server
+HF_HUB_DISABLE_XET=1 .venv/bin/python -m uvicorn server:app --host 0.0.0.0 --port 8880
 ```
 
-#### Generate with context
+First run downloads the model (~4GB). Subsequent starts take ~2 seconds.
 
-CSM sounds best when provided with context. You can prompt or provide context to the model using a `Segment` for each speaker's utterance.
+### Generate speech
 
-NOTE: The following example is instructional and the audio files do not exist. It is intended as an example for using context with CSM.
-
-```python
-from generator import Segment
-
-speakers = [0, 1, 0, 0]
-transcripts = [
-    "Hey how are you doing.",
-    "Pretty good, pretty good.",
-    "I'm great.",
-    "So happy to be speaking to you.",
-]
-audio_paths = [
-    "utterance_0.wav",
-    "utterance_1.wav",
-    "utterance_2.wav",
-    "utterance_3.wav",
-]
-
-def load_audio(audio_path):
-    audio_tensor, sample_rate = torchaudio.load(audio_path)
-    audio_tensor = torchaudio.functional.resample(
-        audio_tensor.squeeze(0), orig_freq=sample_rate, new_freq=generator.sample_rate
-    )
-    return audio_tensor
-
-segments = [
-    Segment(text=transcript, speaker=speaker, audio=load_audio(audio_path))
-    for transcript, speaker, audio_path in zip(transcripts, speakers, audio_paths)
-]
-audio = generator.generate(
-    text="Me too, this is some cool stuff huh?",
-    speaker=1,
-    context=segments,
-    max_audio_length_ms=10_000,
-)
-
-torchaudio.save("audio.wav", audio.unsqueeze(0).cpu(), generator.sample_rate)
+```bash
+curl -X POST http://localhost:8880/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"csm-1b","input":"Hello, this is a test.","voice":"conversational"}' \
+  --output speech.mp3
 ```
 
-## FAQ
+### Supported formats
 
-**Does this model come with any voices?**
+| Format | Content-Type | Flag |
+|--------|-------------|------|
+| MP3 | `audio/mpeg` | `"response_format": "mp3"` (default) |
+| WAV | `audio/wav` | `"response_format": "wav"` |
+| Opus | `audio/opus` | `"response_format": "opus"` |
+| FLAC | `audio/flac` | `"response_format": "flac"` |
 
-The model open-sourced here is a base generation model. It is capable of producing a variety of voices, but it has not been fine-tuned on any specific voice.
+### Voices
 
-**Can I converse with the model?**
+| Voice | Description |
+|-------|-------------|
+| `conversational` | Natural, warm conversational voice (default) |
+| `conversational_b` | Second conversational voice, different character |
 
-CSM is trained to be an audio generation model and not a general-purpose multimodal LLM. It cannot generate text. We suggest using a separate LLM for text generation.
+Add custom voices by creating JSON files in the `presets/` directory.
 
-**Does it support other languages?**
+## API Endpoints
 
-The model has some capacity for non-English languages due to data contamination in the training data, but it likely won't do well.
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/audio/speech` | Generate speech (OpenAI-compatible) |
+| GET | `/v1/models` | List available models |
+| GET | `/health` | Server health + model status |
 
-## Misuse and abuse ⚠️
+### Request body (`/v1/audio/speech`)
 
-This project provides a high-quality speech generation model for research and educational purposes. While we encourage responsible and ethical use, we **explicitly prohibit** the following:
+```json
+{
+  "model": "csm-1b",
+  "input": "Text to speak",
+  "voice": "conversational",
+  "response_format": "mp3",
+  "speed": 1.0
+}
+```
 
-- **Impersonation or Fraud**: Do not use this model to generate speech that mimics real individuals without their explicit consent.
-- **Misinformation or Deception**: Do not use this model to create deceptive or misleading content, such as fake news or fraudulent calls.
-- **Illegal or Harmful Activities**: Do not use this model for any illegal, harmful, or malicious purposes.
+- `model`: Required but ignored (single model)
+- `input`: 1-4096 characters
+- `voice`: Preset name from `presets/`
+- `response_format`: `mp3`, `wav`, `opus`, or `flac`
+- `speed`: Accepted for compatibility, not applied in v1
 
-By using this model, you agree to comply with all applicable laws and ethical guidelines. We are **not responsible** for any misuse, and we strongly condemn unethical applications of this technology.
+## OpenClaw Integration
 
----
+Point OpenClaw at the local server:
 
-## Authors
-Johan Schalkwyk, Ankit Kumar, Dan Lyth, Sefik Emre Eskimez, Zack Hodari, Cinjon Resnick, Ramon Sanabria, Raven Jiang, and the Sesame team.
+```
+TTS Base URL: http://localhost:8880/v1
+TTS Model: csm-1b
+TTS Voice: conversational
+```
+
+## Running as a Service (launchd)
+
+```bash
+# Create log directory
+mkdir -p ~/.cache/sesame-tts
+
+# Install the service
+cp com.burkestudio.sesame-tts.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.burkestudio.sesame-tts.plist
+
+# Check status
+launchctl list | grep sesame
+
+# View logs
+tail -f ~/.cache/sesame-tts/server.log
+
+# Stop the service
+launchctl unload ~/Library/LaunchAgents/com.burkestudio.sesame-tts.plist
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and modify as needed. All settings can also be set via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | `0.0.0.0` | Bind address |
+| `PORT` | `8880` | Server port |
+| `MODEL_ID` | `mlx-community/csm-1b` | HuggingFace model ID |
+| `DEFAULT_VOICE` | `conversational` | Default voice preset |
+| `DEFAULT_FORMAT` | `mp3` | Default output format |
+| `LOG_LEVEL` | `info` | Logging level |
+
+## Testing
+
+```bash
+uv sync --extra test
+HF_HUB_DISABLE_XET=1 .venv/bin/python -m pytest tests/ -v
+```
+
+## Architecture
+
+Thin wrapper around mlx-audio's CSM-1B implementation:
+
+```
+server.py          → FastAPI routes, request validation, semaphore
+tts_engine.py      → Model loading via mlx-audio, generation wrapper
+audio_converter.py → ffmpeg subprocess for format conversion
+voice_presets.py   → JSON preset loading
+config.py          → pydantic-settings configuration
+errors.py          → OpenAI-compatible error responses
+```
+
+## Credits
+
+- [Sesame CSM-1B](https://github.com/SesameAILabs/csm) — the underlying speech model
+- [mlx-audio](https://github.com/Blaizzy/mlx-audio) — MLX inference wrapper
+- [mlx-community/csm-1b](https://huggingface.co/mlx-community/csm-1b) — MLX-converted weights

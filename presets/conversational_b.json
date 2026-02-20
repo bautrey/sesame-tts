@@ -1,0 +1,9 @@
+{
+    "name": "conversational_b",
+    "voice_key": "conversational_b",
+    "speaker_id": 1,
+    "temperature": 0.9,
+    "top_k": 50,
+    "max_audio_length_ms": 90000,
+    "description": "Second conversational voice, slightly different character"
+}

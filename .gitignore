@@ -22,10 +22,16 @@ wheels/
 
 # Virtual Environment
 .env
-.venv
+.venv/
 env/
 venv/
 ENV/
+
+# Testing
+.pytest_cache/
+
+# Lockfile
+uv.lock
 
 # IDE
 .idea/

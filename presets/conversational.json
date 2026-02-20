@@ -1,0 +1,9 @@
+{
+    "name": "conversational",
+    "voice_key": "conversational_a",
+    "speaker_id": 0,
+    "temperature": 0.9,
+    "top_k": 50,
+    "max_audio_length_ms": 90000,
+    "description": "Natural, warm conversational voice (default)"
+}
