@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 settings = Settings()
 preset_manager = VoicePresetManager(settings.presets_dir)
 
+# Alphanumeric aliases for ElevenLabs compatibility (no underscores allowed)
+VOICE_ALIASES = {
+    "conversationalB": "conversational_b",
+    "conversationalA": "conversational",
+}
+
+
+def resolve_voice(voice_id: str) -> str:
+    """Resolve a voice alias to its real preset name."""
+    return VOICE_ALIASES.get(voice_id, voice_id)
+
 # Serial inference via semaphore
 inference_semaphore = asyncio.Semaphore(1)
 
@@ -111,10 +122,11 @@ async def create_speech(req: SpeechRequest):
         )
 
     # Validate voice
-    preset = preset_manager.get(req.voice)
+    voice_name = resolve_voice(req.voice)
+    preset = preset_manager.get(voice_name)
     if preset is None:
         raise TTSError(
-            f"Voice '{req.voice}' not found. Available voices: {', '.join(preset_manager.list_names())}",
+            f"Voice '{voice_name}' not found. Available voices: {', '.join(preset_manager.list_names())}",
             "invalid_request_error",
             "invalid_voice",
         )
@@ -185,6 +197,7 @@ async def health_check():
     model_health = engine.health()
     ffmpeg_available = shutil.which("ffmpeg") is not None
     voices = preset_manager.list_names()
+    all_voice_ids = voices + [alias for alias in VOICE_ALIASES if VOICE_ALIASES[alias] in voices]
 
     status = "ok" if model_health["model_loaded"] and ffmpeg_available else "degraded"
 
@@ -192,6 +205,6 @@ async def health_check():
         "status": status,
         "model": model_health,
         "ffmpeg": ffmpeg_available,
-        "voices": voices,
+        "voices": all_voice_ids,
         "uptime_seconds": round(time.time() - _start_time),
     }

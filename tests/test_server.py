@@ -98,6 +98,17 @@ async def test_speech_flac(client):
 
 
 @pytest.mark.asyncio
+async def test_speech_voice_alias(client):
+    resp = await client.post(
+        "/v1/audio/speech",
+        json={"model": "csm-1b", "input": "Hello.", "voice": "conversationalB"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "audio/mpeg"
+    assert len(resp.content) > 0
+
+
+@pytest.mark.asyncio
 async def test_invalid_voice(client):
     resp = await client.post(
         "/v1/audio/speech",
