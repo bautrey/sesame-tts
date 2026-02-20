@@ -1,0 +1,6 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "/Users/burkestudio/.claude/statusline-command.sh"
+  }
+}
