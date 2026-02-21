@@ -19,10 +19,9 @@ max_capture_duration_s: 30          # Max recording duration before auto-stop (s
 whisper_model: "mlx-community/whisper-large-v3-turbo"
 
 # OpenClaw Gateway
-gateway_url: "ws://127.0.0.1:18789"
+gateway_url: "http://127.0.0.1:18789"
 gateway_token: "gateway-token"      # Auth token; auto-read from ~/.openclaw/openclaw.json if not set
-gateway_timeout_s: 10               # Timeout waiting for gateway response (seconds)
-gateway_reconnect_max_s: 30         # Max backoff for reconnection attempts (seconds)
+gateway_timeout_s: 60               # Timeout waiting for gateway response (seconds)
 
 # Sesame TTS Server
 tts_url: "http://localhost:8880"

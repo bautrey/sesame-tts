@@ -74,7 +74,6 @@ class VoiceLoop:
             url=settings.gateway_url,
             token=settings.gateway_token,
             timeout_s=settings.gateway_timeout_s,
-            reconnect_max_s=settings.gateway_reconnect_max_s,
         )
         self.tts = TTSClient(
             base_url=settings.tts_url,

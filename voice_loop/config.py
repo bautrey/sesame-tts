@@ -30,7 +30,7 @@ class VoiceLoopSettings(BaseSettings):
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
 
     # Gateway
-    gateway_url: str = "ws://127.0.0.1:18789"
+    gateway_url: str = "http://127.0.0.1:18789"
     gateway_token: str = "gateway-token"
     gateway_timeout_s: int = 10
     gateway_reconnect_max_s: int = 30

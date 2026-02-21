@@ -1,165 +1,121 @@
-"""Tests for the OpenClaw Gateway WebSocket client."""
+"""Tests for the OpenClaw Gateway HTTP client."""
 
-import asyncio
 import json
 
+import httpx
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
-def _make_challenge():
-    """Create a gateway challenge message."""
-    return json.dumps({"type": "event", "event": "connect.challenge", "payload": {}})
-
-
-def _make_hello_ok():
-    """Create a successful hello-ok response."""
-    return json.dumps({"type": "res", "ok": True, "id": "test-id"})
-
-
-def _make_auth_failure():
-    """Create a failed auth response."""
-    return json.dumps({"type": "res", "ok": False, "error": "unauthorized"})
-
-
-def _make_chat_event(run_id: str, text: str, state: str = "streaming"):
-    """Create a chat event payload."""
-    return json.dumps({
-        "type": "event",
-        "event": "chat",
-        "payload": {
-            "runId": run_id,
-            "state": state,
-            "message": {
-                "content": [{"type": "text", "text": text}],
-            },
-        },
-    })
+def _sse_lines(chunks: list[str], done: bool = True) -> list[str]:
+    """Build SSE data lines from text chunks."""
+    lines = []
+    for i, text in enumerate(chunks):
+        chunk = {
+            "id": "chatcmpl_test",
+            "object": "chat.completion.chunk",
+            "created": 1000000,
+            "model": "openclaw",
+            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+        }
+        lines.append(f"data: {json.dumps(chunk)}")
+        lines.append("")
+    if done:
+        lines.append("data: [DONE]")
+        lines.append("")
+    return lines
 
 
 class TestConnect:
-    """Verify gateway connection and auth handshake."""
+    """Verify gateway connection check."""
 
-    @patch("voice_loop.gateway_client.websockets")
-    async def test_connect_success(self, mock_ws_module):
-        """Successful connect + auth handshake returns True."""
+    async def test_connect_success(self):
+        """Successful connect returns True."""
         from voice_loop.gateway_client import GatewayClient
 
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[_make_challenge(), _make_hello_ok()])
-        mock_ws.send = AsyncMock()
-        mock_ws.__aiter__ = AsyncMock(return_value=AsyncMock())
-        mock_ws_module.connect = AsyncMock(return_value=mock_ws)
+        client = GatewayClient(url="http://test:18789", token="test-token")
 
-        client = GatewayClient(url="ws://test:18789", token="test-token")
-        result = await client.connect()
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
+            result = await client.connect()
 
         assert result is True
         assert client.connected is True
-        # Verify auth was sent
-        assert mock_ws.send.called
-        sent_data = json.loads(mock_ws.send.call_args[0][0])
-        assert sent_data["method"] == "connect"
-        assert sent_data["params"]["auth"]["token"] == "test-token"
+        await client.close()
 
-    @patch("voice_loop.gateway_client.websockets")
-    async def test_connect_failure_returns_false(self, mock_ws_module):
-        """Connection failure returns False."""
+    async def test_connect_auth_failure(self):
+        """401 response returns False."""
         from voice_loop.gateway_client import GatewayClient
 
-        mock_ws_module.connect = AsyncMock(side_effect=ConnectionRefusedError("refused"))
+        client = GatewayClient(url="http://test:18789", token="bad-token")
 
-        client = GatewayClient(url="ws://test:18789")
-        result = await client.connect()
+        mock_response = AsyncMock()
+        mock_response.status_code = 401
+
+        with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
+            result = await client.connect()
 
         assert result is False
         assert client.connected is False
+        await client.close()
 
-    @patch("voice_loop.gateway_client.websockets")
-    async def test_auth_failure_returns_false(self, mock_ws_module):
-        """Auth failure (non-ok response) returns False."""
+    async def test_connect_network_error(self):
+        """Network error returns False."""
         from voice_loop.gateway_client import GatewayClient
 
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[_make_challenge(), _make_auth_failure()])
-        mock_ws.send = AsyncMock()
-        mock_ws_module.connect = AsyncMock(return_value=mock_ws)
+        client = GatewayClient(url="http://unreachable:18789")
 
-        client = GatewayClient(url="ws://test:18789", token="bad-token")
-        result = await client.connect()
+        with patch.object(httpx.AsyncClient, "post", side_effect=httpx.ConnectError("refused")):
+            result = await client.connect()
 
         assert result is False
         assert client.connected is False
+        await client.close()
+
+    async def test_ws_url_converted_to_http(self):
+        """ws:// URLs are converted to http:// for backwards compat."""
+        from voice_loop.gateway_client import GatewayClient
+
+        client = GatewayClient(url="ws://localhost:18789")
+        assert client.base_url == "http://localhost:18789"
+
+        client2 = GatewayClient(url="wss://localhost:18789")
+        assert client2.base_url == "https://localhost:18789"
 
 
 class TestSendMessage:
-    """Verify send_message yields deltas from chat events."""
+    """Verify send_message yields deltas from SSE stream."""
 
-    @patch("voice_loop.gateway_client.websockets")
-    async def test_send_message_yields_deltas(self, mock_ws_module):
-        """send_message yields text deltas from streaming chat events."""
+    async def test_send_message_yields_deltas(self):
+        """send_message yields text deltas from SSE streaming response."""
         from voice_loop.gateway_client import GatewayClient
 
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[_make_challenge(), _make_hello_ok()])
-        mock_ws.send = AsyncMock()
-        mock_ws_module.connect = AsyncMock(return_value=mock_ws)
+        client = GatewayClient(url="http://test:18789", token="test-token")
+        # Manually set up client without real connection
+        client._client = httpx.AsyncClient(base_url="http://test:18789")
+        client._connected = True
 
-        client = GatewayClient(url="ws://test:18789", token="test-token", timeout_s=2)
+        lines = _sse_lines(["Hello ", "world!"])
 
-        # Make the event listener a no-op to avoid it consuming our mock
-        async def noop_iter():
-            # Block forever (simulates idle websocket)
-            await asyncio.Event().wait()
-            yield  # pragma: no cover
+        async def async_line_iter():
+            for line in lines:
+                yield line
 
-        mock_ws.__aiter__ = lambda self: noop_iter()
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.aiter_lines = async_line_iter
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
 
-        await client.connect()
-
-        # Now simulate what the event listener would do by putting events directly into the queue
-        # We need to capture the idempotency_key used by send_message
-        original_send = mock_ws.send
-
-        captured_key = None
-
-        async def capture_send(data):
-            nonlocal captured_key
-            msg = json.loads(data)
-            if msg.get("method") == "chat.send":
-                captured_key = msg["params"]["idempotencyKey"]
-
-        mock_ws.send = capture_send
-
-        # Run send_message and feed events in parallel
-        collected = []
-
-        async def feed_events():
-            """Wait for the key to be captured, then feed events into the queue."""
-            while captured_key is None:
-                await asyncio.sleep(0.01)
-            q = client._pending_runs[captured_key]
-            await q.put({
-                "state": "streaming",
-                "message": {"content": [{"type": "text", "text": "Hello "}]},
-            })
-            await q.put({
-                "state": "streaming",
-                "message": {"content": [{"type": "text", "text": "world!"}]},
-            })
-            await q.put({
-                "state": "final",
-                "message": {"content": [{"type": "text", "text": ""}]},
-            })
-
-        feeder = asyncio.create_task(feed_events())
-
-        async for delta in client.send_message("Test input"):
-            if delta:
+        with patch.object(client._client, "stream", return_value=mock_response):
+            collected = []
+            async for delta in client.send_message("Test input"):
                 collected.append(delta)
 
-        await feeder
         assert collected == ["Hello ", "world!"]
+        await client.close()
 
     async def test_send_message_not_connected_raises(self):
         """send_message raises ConnectionError when not connected."""
@@ -168,138 +124,53 @@ class TestSendMessage:
         client = GatewayClient()
         with pytest.raises(ConnectionError, match="Not connected"):
             async for _ in client.send_message("test"):
-                pass  # pragma: no cover
+                pass
 
-    @patch("voice_loop.gateway_client.websockets")
-    async def test_send_message_timeout(self, mock_ws_module):
-        """send_message raises TimeoutError when gateway doesn't respond."""
+    async def test_send_message_error_status(self):
+        """send_message raises RuntimeError on non-200 response."""
         from voice_loop.gateway_client import GatewayClient
 
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[_make_challenge(), _make_hello_ok()])
-        mock_ws.send = AsyncMock()
-        mock_ws_module.connect = AsyncMock(return_value=mock_ws)
+        client = GatewayClient(url="http://test:18789", token="test-token")
+        client._client = httpx.AsyncClient(base_url="http://test:18789")
+        client._connected = True
 
-        # Event listener no-op
-        async def noop_iter():
-            await asyncio.Event().wait()
-            yield  # pragma: no cover
+        mock_response = AsyncMock()
+        mock_response.status_code = 500
+        mock_response.aread = AsyncMock(return_value=b"Internal Server Error")
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
 
-        mock_ws.__aiter__ = lambda self: noop_iter()
+        with patch.object(client._client, "stream", return_value=mock_response):
+            with pytest.raises(RuntimeError, match="Gateway error 500"):
+                async for _ in client.send_message("test"):
+                    pass
 
-        client = GatewayClient(url="ws://test:18789", token="test-token", timeout_s=0.1)
-        await client.connect()
-
-        with pytest.raises(TimeoutError, match="Gateway response timeout"):
-            async for _ in client.send_message("test"):
-                pass  # pragma: no cover
-
-
-class TestReconnect:
-    """Verify reconnect loop with exponential backoff."""
-
-    @patch("voice_loop.gateway_client.websockets")
-    async def test_reconnect_doubles_delay(self, mock_ws_module):
-        """Reconnect loop doubles delay on each failure up to max."""
-        from voice_loop.gateway_client import GatewayClient
-
-        call_count = 0
-
-        async def fail_then_succeed(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                raise ConnectionRefusedError("refused")
-            mock_ws = AsyncMock()
-            mock_ws.recv = AsyncMock(side_effect=[_make_challenge(), _make_hello_ok()])
-            mock_ws.send = AsyncMock()
-            mock_ws.__aiter__ = lambda self: AsyncMock().__aiter__()
-            return mock_ws
-
-        mock_ws_module.connect = fail_then_succeed
-
-        client = GatewayClient(url="ws://test:18789", reconnect_max_s=10)
-        client._reconnect_delay = 0.01  # Speed up test
-
-        # Run reconnect loop with a timeout
-        task = asyncio.create_task(client._reconnect_loop())
-        try:
-            await asyncio.wait_for(task, timeout=2.0)
-        except asyncio.TimeoutError:
-            pass  # May or may not complete within timeout
-
-        # Should have attempted multiple connects
-        assert call_count >= 2
+        await client.close()
 
 
 class TestAbortRun:
-    """Verify abort_run sends correct message."""
+    """Verify abort_run is a no-op in HTTP mode."""
 
-    @patch("voice_loop.gateway_client.websockets")
-    async def test_abort_run_sends_message(self, mock_ws_module):
-        """abort_run sends a chat.abort request with the run ID."""
+    async def test_abort_run_no_error(self):
+        """abort_run does not raise in HTTP mode."""
         from voice_loop.gateway_client import GatewayClient
 
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[_make_challenge(), _make_hello_ok()])
-        mock_ws.send = AsyncMock()
-        mock_ws_module.connect = AsyncMock(return_value=mock_ws)
-
-        async def noop_iter():
-            await asyncio.Event().wait()
-            yield  # pragma: no cover
-
-        mock_ws.__aiter__ = lambda self: noop_iter()
-
-        client = GatewayClient(url="ws://test:18789", token="test-token")
-        await client.connect()
-
-        await client.abort_run("run-123")
-
-        # Find the abort call (skip the connect send)
-        calls = [c for c in mock_ws.send.call_args_list if c is not None]
-        # The last send call should be the abort
-        # But since we mocked send during connect too, we need to check
-        # Actually send was mocked, so call_args_list has the connect req + abort
-        abort_call = None
-        for call in mock_ws.send.call_args_list:
-            data = json.loads(call[0][0])
-            if data.get("method") == "chat.abort":
-                abort_call = data
-                break
-
-        assert abort_call is not None
-        assert abort_call["params"]["runId"] == "run-123"
-        assert abort_call["params"]["sessionKey"] == "main"
+        client = GatewayClient()
+        await client.abort_run("run-123")  # Should not raise
 
 
 class TestClose:
     """Verify clean shutdown."""
 
-    @patch("voice_loop.gateway_client.websockets")
-    async def test_close_disconnects(self, mock_ws_module):
-        """close() sets connected to False and closes WebSocket."""
+    async def test_close_disconnects(self):
+        """close() sets connected to False and closes HTTP client."""
         from voice_loop.gateway_client import GatewayClient
 
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[_make_challenge(), _make_hello_ok()])
-        mock_ws.send = AsyncMock()
-        mock_ws.close = AsyncMock()
-        mock_ws_module.connect = AsyncMock(return_value=mock_ws)
-
-        async def noop_iter():
-            await asyncio.Event().wait()
-            yield  # pragma: no cover
-
-        mock_ws.__aiter__ = lambda self: noop_iter()
-
-        client = GatewayClient(url="ws://test:18789", token="test-token")
-        await client.connect()
-
-        assert client.connected is True
+        client = GatewayClient(url="http://test:18789", token="test-token")
+        client._client = AsyncMock()
+        client._connected = True
 
         await client.close()
 
         assert client.connected is False
-        assert client._ws is None
-        mock_ws.close.assert_called_once()
+        assert client._client is None

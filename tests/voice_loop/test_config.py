@@ -22,7 +22,7 @@ class TestDefaultValues:
         assert settings.vad_aggressiveness == 3
         assert settings.max_capture_duration_s == 30
         assert settings.whisper_model == "mlx-community/whisper-large-v3-turbo"
-        assert settings.gateway_url == "ws://127.0.0.1:18789"
+        assert settings.gateway_url == "http://127.0.0.1:18789"
         assert settings.gateway_token == "gateway-token"
         assert settings.gateway_timeout_s == 10
         assert settings.gateway_reconnect_max_s == 30
@@ -57,7 +57,7 @@ class TestYamlOverride:
         assert settings.tts_voice == "custom_voice"
         assert settings.log_level == "debug"
         # Non-overridden values remain default
-        assert settings.gateway_url == "ws://127.0.0.1:18789"
+        assert settings.gateway_url == "http://127.0.0.1:18789"
 
     def test_missing_yaml_returns_defaults(self, tmp_path: Path, monkeypatch):
         # Monkeypatch home to tmp_path so no real openclaw.json is found
