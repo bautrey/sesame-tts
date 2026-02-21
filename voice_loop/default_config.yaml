@@ -1,0 +1,41 @@
+# Sesame Voice Loop Configuration
+# Copy to ~/.config/sesame-voice/config.yaml to customize.
+# Environment variables (prefixed VOICE_LOOP_) override all values here.
+
+# Audio devices -- set to substring of device name, or leave null for system default
+mic_device: null
+speaker_device: null
+
+# Push-to-talk hotkey (macOS key combo)
+push_to_talk_hotkey: "cmd+shift+space"
+
+# Speech capture
+sample_rate: 16000                  # Whisper-native sample rate (Hz)
+vad_silence_threshold_ms: 1000      # Silence duration to end capture (ms)
+vad_aggressiveness: 3               # webrtcvad aggressiveness 0-3 (3 = most aggressive)
+max_capture_duration_s: 30          # Max recording duration before auto-stop (seconds)
+
+# Transcription
+whisper_model: "mlx-community/whisper-large-v3-turbo"
+
+# OpenClaw Gateway
+gateway_url: "ws://127.0.0.1:18789"
+gateway_token: "gateway-token"      # Auth token; auto-read from ~/.openclaw/openclaw.json if not set
+gateway_timeout_s: 10               # Timeout waiting for gateway response (seconds)
+gateway_reconnect_max_s: 30         # Max backoff for reconnection attempts (seconds)
+
+# Sesame TTS Server
+tts_url: "http://localhost:8880"
+tts_voice: "conversationalB"
+tts_format: "pcm_24000"
+
+# Interrupt detection (during playback)
+interrupt_energy_threshold: 0.02    # RMS energy threshold for speech detection
+interrupt_consecutive_frames: 3     # Consecutive frames above threshold to trigger interrupt
+
+# Logging
+log_level: "info"                   # debug, info, warning, error
+log_file: "~/.cache/sesame-voice/voice-loop.log"
+
+# Process
+run_as_menu_bar: true               # false to run headless (useful for testing)
