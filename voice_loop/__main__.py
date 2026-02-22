@@ -73,6 +73,7 @@ def main():
         asyncio.run(voice_loop.start())
     else:
         # Menu bar mode: run rumps on main thread, asyncio in daemon thread
+        from .hotkey import register_ptt_hotkey, unregister_ptt_hotkey
         from .menu_bar import VoiceLoopMenuBar
 
         # We need to capture the event loop reference from the daemon thread
@@ -93,6 +94,7 @@ def main():
         time.sleep(0.1)
 
         def on_quit():
+            unregister_ptt_hotkey()
             loop = loop_holder.get("loop")
             if loop and loop.is_running():
                 asyncio.run_coroutine_threadsafe(voice_loop.shutdown(), loop)
@@ -106,6 +108,9 @@ def main():
         voice_loop.state.on_transition(
             lambda old, new: menu_app.update_state(new.value)
         )
+
+        # Register global hotkey (right Option key) for push-to-talk
+        register_ptt_hotkey(voice_loop.trigger_ptt)
 
         menu_app.run()
 
